@@ -7,7 +7,7 @@ import tempfile
 import time
 import traceback
 import uuid
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional
 
 from langchain_core.tools import tool
 
@@ -34,8 +34,6 @@ def word_to_markdown(file_path: str) -> str:
     使用约定:
     - 调用方应根据第一项的类型/内容判断是否成功（错误信息以字符串形式返回）。
     """
-    from tools.third_party.aliyun_oss_uploader import upload_file
-
     tmp_file_path = None
     if file_path.startswith("http://") or file_path.startswith("https://"):
         import requests
@@ -55,8 +53,11 @@ def word_to_markdown(file_path: str) -> str:
             return f"Failed to download the file: {str(file_path)}"
 
     try:
+        from tools.third_party.aliyun_oss_uploader import upload_file
+
         md = process(file_path, upload_func=upload_file)
-        md_file_url = upload_file(md.encode("utf-8"), "output.md")
+        filename = f"output_{int(time.time())}.md"
+        md_file_url = upload_file(md.encode("utf-8"), filename)
         return md_file_url
     except Exception as e:
         print(f"Error converting file to markdown: {str(e)}")

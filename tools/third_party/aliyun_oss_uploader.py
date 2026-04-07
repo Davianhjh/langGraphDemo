@@ -22,9 +22,9 @@ import uuid
 from typing import Optional
 
 
-def upload_file(image_bytes: bytes, filename: Optional[str] = None) -> str:
+def upload_file(file_bytes: bytes, filename: Optional[str] = None) -> str:
     """
-    Upload `image_bytes` to Aliyun OSS and return the public URL.
+    Upload `file_bytes` to Aliyun OSS and return the public URL.
 
     Reads credentials/config from environment variables. Raises RuntimeError on
     configuration problems, and ImportError if `oss2` is not installed.
@@ -65,7 +65,7 @@ def upload_file(image_bytes: bytes, filename: Optional[str] = None) -> str:
 
     # Perform upload
     # For large objects or advanced use, consider using bucket.put_object_from_file or multipart
-    bucket.put_object(object_name, image_bytes)
+    bucket.put_object(object_name, file_bytes)
 
     # Construct public URL (assuming the bucket is accessible via https://{bucket}.{endpoint}/{object})
     if endpoint.startswith('http://') or endpoint.startswith('https://'):
@@ -76,10 +76,3 @@ def upload_file(image_bytes: bytes, filename: Optional[str] = None) -> str:
     url = f'https://{bucket_name}.{ep}/{object_name}'
     return url
 
-
-if __name__ == "__main__":
-    # Example usage: upload a local file
-    with open("D:\\3ee0dafdcfbd4a6d805faea3368616d0.png", 'rb') as f:
-        image_bytes = f.read()
-    url = upload_file(image_bytes, 'example.png')
-    print('Uploaded image URL:', url)

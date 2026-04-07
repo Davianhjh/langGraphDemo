@@ -19,9 +19,9 @@ def create_llm():
         A tuple (llm, llm_with_tools).
     """
     llm = ChatOpenAI(
-        api_key=os.getenv("DASHSCOPE_API_KEY"),
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        model="qwen3.5-plus",
+        api_key=os.getenv("OPENROUTER_API_KEY"),
+        base_url="https://openrouter.ai/api/v1",
+        model="qwen/qwen3.6-plus:free",
     )
     llm_with_tools = llm.bind_tools(tools)
     return llm, llm_with_tools
@@ -71,9 +71,9 @@ def stream_graph_updates(graph, user_input: str):
     }
 
     for event in graph.stream({"messages": [("user", user_input)]}, config, stream_mode="values"):
-        event["messages"][-1].pretty_print()
-        # for value in event.values():
-        #     print("Assistant:", value["messages"][-1].content)
+        event_message = event["messages"][-1]
+        if event_message.type == 'ai':
+            print("Assistant:", event_message.content)
 
 
 def main():
