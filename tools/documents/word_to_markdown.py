@@ -12,27 +12,35 @@ from typing import Callable, Optional
 from langchain_core.tools import tool
 
 
-@tool(description="将 Word 文档或远程 Word 文件转换为 Markdown，并上传生成的 Markdown 文件。"
-                  "输入为本地文件路径或可访问的 URL，返回 Markdown 文本与产物 URL 列表；失败时返回错误信息与空列表。")
+@tool(description="将 Word (.doc/.docx/.rtf) 转为 Markdown，并上传生成的 Markdown 文件，返回文件 URL 或错误信息")
 def word_to_markdown(file_path: str) -> str:
     """
-    将 Word 文档转换为 Markdown 的工具（可由模型直接调用）。
+    工具：将 Word 文档转换为 Markdown 并上传（可由模型直接调用）。
 
-    功能:
-    - 接受本地文件路径或远程 URL（以 `http://` 或 `https://` 开头）。
-    - 若输入为 URL，会下载到临时文件后再转换。
-    - 使用内部转换函数生成 Markdown，并将结果上传以返回文件 URL。
+    功能概述：
+    - 支持输入类型：`.doc`, `.docx`, `.rtf`；同时支持以 `http://` 或 `https://` 开头的远程 URL（会先下载到临时文件）。
+    - 若为 `.doc` 或 `.rtf`，会先调用 LibreOffice（soffice）将其转换为 `.docx`，然后使用 mammoth 将 `.docx` 转为 HTML，再使用 pypandoc 将 HTML 转为 GitHub-flavored Markdown（GFM）。
+    - 在将 Word 转为 HTML 时，图片会通过 `upload_func` 上传（默认使用内置的 data-uri 上传器），并将图片链接内嵌到最终的 Markdown 中。
+    - 返回值为上传并保存后的 Markdown 文件 URL（字符串）。若发生错误，则返回可读的错误信息字符串。
 
-    参数:
-    - `file_path` (str): 本地文件路径或远程文件 URL。
+    参数：
+    - `file_path` (str): 本地文件路径或远程文件 URL（http/https）。
 
-    返回:
-    - Tuple[str, List[str]]:
-      - 第一项: 成功时为生成的 Markdown 文本；失败时为错误描述字符串。
-      - 第二项: 产物 URL 列表（成功时包含上传后的 Markdown 文件 URL，失败时为空列表）。
+    返回：
+    - str: 成功时返回上传后的 Markdown 文件访问 URL；失败时返回错误描述字符串。
 
-    使用约定:
-    - 调用方应根据第一项的类型/内容判断是否成功（错误信息以字符串形式返回）。
+    错误处理与注意：
+    - 函数会在内部调用 `tools.third_party.aliyun_oss_uploader.upload_file` 上传生成的 Markdown 文件以及转换过程中的图片（若提供 `upload_func` 则使用之）。
+    - 若你在本地测试或不希望真实上传，可调用模块内的 `process(input_path, upload_func=your_stub)` 来注入一个本地上传函数 `upload_func(bytes, filename) -> str`，以便把图片或 Markdown 写到本地并获得本地路径作为返回值。
+    - 若系统缺少依赖（mammoth 或 pypandoc），`process` 内会抛出 RuntimeError，调用方应根据返回信息辨识失败原因。
+
+    模型调用建议：
+    - 模型作为工具调用时只需传入 `file_path` 字符串，工具会同步返回字符串：成功时为 URL，失败时为错误信息。
+    - 若需要结构化返回（例如 JSON 包含 success/data/error），建议在上层对本工具进行封装或请求我把返回改为 JSON。
+
+    示例（伪代码）：
+        word_to_markdown('C:/tmp/report.docx') -> 'https://.../output_123456.md'
+
     """
     tmp_file_path = None
     if file_path.startswith("http://") or file_path.startswith("https://"):
@@ -68,15 +76,12 @@ def word_to_markdown(file_path: str) -> str:
 
 
 def process(input_path: str, upload_func: Optional[Callable[[bytes, Optional[str]], str]] = None) -> str:
-    """
-    High-level convenience: take a .doc or .docx path and return a Markdown string.
-    """
     # prepare docx path
     ext = os.path.splitext(input_path)[1].lower()
     cleanup_tmp = False
-    if ext == '.doc':
+    if ext == '.doc' or ext == '.rtf':
         print("converting doc to docx...")
-        docx_path = convert_doc_to_docx(input_path)
+        docx_path = convert_to_docx(input_path)
         cleanup_tmp = True
     elif ext == '.docx':
         docx_path = input_path
@@ -93,9 +98,8 @@ def process(input_path: str, upload_func: Optional[Callable[[bytes, Optional[str
     finally:
         if cleanup_tmp:
             # delete the temp dir containing the docx
-            td = os.path.dirname(docx_path)
             try:
-                shutil.rmtree(td)
+                os.remove(docx_path)
             except Exception:
                 pass
 
@@ -123,22 +127,12 @@ def _ensure_deps_available():
             f"Missing python packages: {', '.join(missing)}. Add them to requirements.txt and pip install.")
 
 
-def convert_doc_to_docx(input_path: str) -> str:
-    """
-    If input_path is a .docx, return it unchanged. If it's a .doc, attempt to convert
-    to a temporary .docx file and return that path.
-
-    Conversion methods (in order):
-    - win32com (requires pywin32, only on Windows with MS Word installed)
-    - soffice (LibreOffice / OpenOffice) commandline conversion
-
-    Raises RuntimeError if conversion fails.
-    """
+def convert_to_docx(input_path: str) -> str:
     input_path = os.path.abspath(input_path)
     ext = os.path.splitext(input_path)[1].lower()
     if ext == '.docx':
         return input_path
-    if ext != '.doc':
+    if ext != '.doc' and ext != '.rtf':
         raise ValueError('Unsupported file extension: ' + ext)
 
     # create a temporary output path
