@@ -19,9 +19,9 @@ def create_llm():
         A tuple (llm, llm_with_tools).
     """
     llm = ChatOpenAI(
-        api_key=os.getenv("OPENROUTER_API_KEY"),
-        base_url="https://openrouter.ai/api/v1",
-        model="qwen/qwen3.6-plus:free",
+        api_key=os.getenv("OLLAMA_API_KEY"),
+        base_url="https://ollama.com/v1",
+        model="gemma4:31b-cloud",
     )
     llm_with_tools = llm.bind_tools(tools)
     return llm, llm_with_tools
