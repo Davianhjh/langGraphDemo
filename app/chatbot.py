@@ -55,7 +55,10 @@ def init_graph(llm_with_tools):
     # 每当调用工具时，我们返回到聊天机器人以决定下一步
     graph_builder.add_edge("tools", "chatbot")
     graph_builder.add_edge(START, "chatbot")
-    return graph_builder.compile(checkpointer=checkpointer)
+    return graph_builder.compile(
+        checkpointer=checkpointer,
+        interrupt_before=["tools"]
+    )
 
 
 def stream_graph_updates(graph, user_input: str):
@@ -71,9 +74,11 @@ def stream_graph_updates(graph, user_input: str):
     }
 
     for event in graph.stream({"messages": [("user", user_input)]}, config, stream_mode="values"):
-        event_message = event["messages"][-1]
-        if event_message.type == 'ai':
-            print("Assistant:", event_message.content)
+        if "messages" in event:
+            event["messages"][-1].pretty_print()
+        # event_message = event["messages"][-1]
+        # if event_message.type == 'ai':
+        #     print("Assistant:", event_message.content)
 
 
 def main():
