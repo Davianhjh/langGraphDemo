@@ -56,7 +56,7 @@ def chat(req: ChatRequest):
             for event in lang_app.stream(inputs, config=config, stream_mode="updates"):
                 for _node_name, update in event.items():
                     if _node_name == "chatbot":
-                        new_msg = update.get("message")[-1]  # 取最新消息
+                        new_msg = update.get("messages")[-1]  # 取最新消息
                         if len(new_msg.content) > 0:
                             yield sse_data(new_msg.content)
 
