@@ -10,4 +10,11 @@ tools = [
     excel_to_markdown
 ]
 
+tool_required_args = {
+    "tavily_search": ["query"],
+    "word_to_markdown": ["file_path"],
+    "audio_transcribe": ["file_path"],
+    "excel_to_markdown": ["file_path"],
+}
+
 

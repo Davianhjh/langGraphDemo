@@ -1,0 +1,78 @@
+from typing import Literal, Optional
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel
+
+from app.chatbot import init_graph
+
+app = FastAPI()
+lang_app = init_graph()
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant", "tool"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    thread_id: Optional[str] = None
+    messages: list[ChatMessage]
+
+
+def sse_data(text: str) -> str:
+    # 按 SSE 协议输出一条 data 行
+    # 注意要替换换行，否则会被 SSE 当成多条 event
+    safe = text.replace("\r", "").replace("\n", "\\n")
+    return f"data: {safe}\n\n"
+
+
+@app.post("/chat")
+def chat(req: ChatRequest):
+    thread_id = req.thread_id
+
+    # 只取本轮最新 user 消消息追加给 LangGraph
+    last_user = next((m for m in reversed(req.messages) if m.role == "user"), None)
+    if not last_user:
+        # 没有用户消息就直接结束
+        return StreamingResponse(iter([sse_data("[DONE]")]), media_type="text/event-stream")
+
+    inputs = {
+        "messages": [
+            SystemMessage(
+                content="你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。并能够判断用户的意图和自己的工具能力匹配时，无论是否缺少参数，优先执行工具调用。"),
+            HumanMessage(content=last_user.content)
+        ]
+    }
+
+    # 关键：把 thread_id 交给 checkpointer，用于恢复/续写同一条对话
+    config = {"configurable": {"thread_id": thread_id}}
+
+    def event_gen():
+        try:
+            # updates：每一步仅返回增量字段（避免重复）
+            for event in lang_app.stream(inputs, config=config, stream_mode="updates"):
+                for _node_name, update in event.items():
+                    if _node_name == "chatbot":
+                        new_msg = update.get("message")[-1]  # 取最新消息
+                        if len(new_msg.content) > 0:
+                            yield sse_data(new_msg.content)
+
+            yield sse_data("[DONE]")
+        except Exception as e:
+            print(f"Error in event_gen: {e}")
+            # 出错也要结束流，否则前端卡住
+            yield sse_data(f"[ERROR] {type(e).__name__}: {e}")
+            yield sse_data("[DONE]")
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"X-Thread-Id": thread_id},
+    )
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
