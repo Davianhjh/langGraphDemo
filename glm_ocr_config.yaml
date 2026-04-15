@@ -1,6 +1,0 @@
-pipeline:
-  maas:
-    enabled: true
-    api_url: http://localhost:5002/glmocr/parse
-    api_key: any        # Self-hosted server does not validate API keys
-    verify_ssl: false          # Internal networks typically lack HTTPS

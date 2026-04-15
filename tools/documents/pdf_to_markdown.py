@@ -1,5 +1,9 @@
+import io
 import os
+import time
 from typing import Optional, Callable
+
+from glmocr import GlmOcr
 
 
 def pdf_to_markdown(file_path: str) -> str:
@@ -24,7 +28,10 @@ def pdf_to_markdown(file_path: str) -> str:
     try:
         from tools.third_party.aliyun_oss_uploader import upload_file
 
-        return process(file_path, upload_func=upload_file)
+        md = process(file_path, upload_func=upload_file)
+        filename = f"output_{int(time.time())}.md"
+        md_file_url = upload_file(md.encode("utf-8"), filename)
+        return md_file_url
     except Exception as e:
         print(f"Error converting file to markdown: {str(e)}")
         return f"Failed to convert the file: {str(file_path)}"
@@ -47,9 +54,21 @@ def process(input_path: str, upload_func: Optional[Callable[[bytes, Optional[str
             poppler_path=os.getenv("POPPLER_PATH"),
             thread_count=2
         )
-        print(f"pdf converted to png pages in {tmpdir}")
+        print(f"pdf converted to {len(converted_image_paths)} png pages")
         print("ocr png to markdown...")
-
+        markdown_content = ""
+        for img_path in converted_image_paths:
+            with GlmOcr(mode="maas", api_key=os.getenv("ZAI_API_KEY")) as parser:
+                parse_result = parser.parse(img_path)
+                parsed_markdown_result = parse_result.markdown_result
+                parsed_image_files = parse_result.image_files
+                if parsed_image_files is not None and len(parsed_image_files) > 0 and upload_func is not None:
+                    for img_name, img in parsed_image_files.items():
+                        uploaded_image_url = upload_func(image_to_binary(img, "PNG"), img_name)
+                        parsed_markdown_result = parsed_markdown_result.replace(f"imgs/{img_name}", uploaded_image_url)
+                    markdown_content += parsed_markdown_result + "\n\n"
+        print("pdf to markdown conversion complete")
+        return markdown_content
     except Exception as e:
         print(f"Error converting PDF to PNG: {str(e)}")
         return f"Failed to convert PDF to PNG: {str(input_path)}"
@@ -105,5 +124,18 @@ def pdf_to_png_pages(
     return converted_image_paths
 
 
+def image_to_binary(image, image_format):
+    # 创建一个内存缓冲区
+    buffer = io.BytesIO()
+    # 将图片保存到缓冲区，指定格式
+    image.save(buffer, image_format)
+    # 获取二进制数据
+    binary_data = buffer.getvalue()
+    # 关闭缓冲区
+    buffer.close()
+    return binary_data
+
+
 if __name__ == "__main__":
-    process("C:\\Users\\hujinhua\\Downloads\\612791ee9086649533592aec215cb720.pdf")
+    md_file = pdf_to_markdown("C:\\Users\\hujinhua\\Downloads\\学科网资料2024072901(9)份\\第1讲 测量和机械运动（集训本）-【学海风暴·PK中考】2024中考物理备考（江西专用）\\第1讲 测量和机械运动.pdf")
+    print(md_file)
