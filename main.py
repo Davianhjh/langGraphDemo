@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from app.chatbot import init_graph
+from app.chat_bot import init_graph
 
 app = FastAPI()
 lang_app = init_graph()
@@ -19,6 +19,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
+    user_id: Optional[str] = None
     messages: list[ChatMessage]
 
 
@@ -32,6 +33,7 @@ def sse_data(text: str) -> str:
 @app.post("/chat")
 def chat(req: ChatRequest):
     thread_id = req.thread_id
+    user_id = req.user_id
 
     # 只取本轮最新 user 消消息追加给 LangGraph
     last_user = next((m for m in reversed(req.messages) if m.role == "user"), None)
@@ -39,7 +41,9 @@ def chat(req: ChatRequest):
         # 没有用户消息就直接结束
         return StreamingResponse(iter([sse_data("[DONE]")]), media_type="text/event-stream")
 
-    inputs = {
+    initial_state = {
+        "thread_id": thread_id,
+        "user_id": user_id,
         "messages": [
             SystemMessage(
                 content="你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。并能够判断用户的意图和自己的工具能力匹配时，无论是否缺少参数，优先执行工具调用。"),
@@ -53,7 +57,7 @@ def chat(req: ChatRequest):
     def event_gen():
         try:
             # updates：每一步仅返回增量字段（避免重复）
-            for event in lang_app.stream(inputs, config=config, stream_mode="updates"):
+            for event in lang_app.stream(initial_state, config=config, stream_mode="updates"):
                 for _node_name, update in event.items():
                     if _node_name == "chatbot":
                         new_msg = update.get("messages")[-1]  # 取最新消息
