@@ -3,10 +3,38 @@ import os
 import time
 from typing import Optional, Callable
 
-from glmocr import GlmOcr
+from langchain_core.tools import tool
 
 
+@tool(description="将 PDF 转为 Markdown，并上传生成的 Markdown 文件，返回文件 URL 或错误信息")
 def pdf_to_markdown(file_path: str) -> str:
+    """
+    工具：将 PDF 转为 Markdown 并上传（可由模型直接调用）。
+
+    功能概述：
+    - 支持传入本地文件路径或远程 URL（以 http:// 或 https:// 开头）；若是远程 URL 会先下载到临时文件再处理。
+    - 将 PDF 按页渲染为高质量 PNG（使用 poppler），对每页调用 `GlmOcr` 进行 OCR/结构化解析，汇总为 Markdown 文本。
+    - 在 `process` 中可接收一个可选的 `upload_func(bytes, filename) -> str` 用于上传中间图片与最终 Markdown；若存在 `tools.third_party.aliyun_oss_uploader.upload_file` 则默认使用之并返回上传后的文件 URL。
+
+    参数:
+        file_path (str): 本地 PDF 文件路径或远程 PDF URL。
+
+    返回:
+        str: 成功时返回上传后的 Markdown 文件访问 URL（当上传函数可用并成功时）；否则返回生成的 Markdown 文本。
+             出错时返回以 "Failed" 开头的可读错误信息字符串。
+
+    行为与注意事项:
+    - 函数为同步接口，适合作为模型工具直接调用：传入 `file_path` 字符串，返回字符串（URL 或错误信息）。
+    - 若需结构化返回值或定制上传行为，可直接调用模块内的 `process(input_path, upload_func=...)`。
+    - 处理过程中会在 finally 中清理下载的临时文件与渲染中间目录，避免残留。
+    - 依赖环境变量 `ZAI_API_KEY`（OCR）和可选的 `POPPLER_PATH`（poppler 可执行路径）。
+
+    示例（伪代码）:
+        pdf_to_markdown('C:/tmp/doc.pdf') -> 'https://.../output_123456.md' 或 转换后的 markdown 文本
+
+    模型调用建议:
+    - 作为模型工具使用时仅需传入 `file_path`，工具会返回字符串；如需更多元化返回（如 JSON），请在上层封装本工具。
+    """
     tmp_file_path = None
     if file_path.startswith("http://") or file_path.startswith("https://"):
         import requests
@@ -57,6 +85,8 @@ def process(input_path: str, upload_func: Optional[Callable[[bytes, Optional[str
         print(f"pdf converted to {len(converted_image_paths)} png pages")
         print("ocr png to markdown...")
         markdown_content = ""
+        from glmocr import GlmOcr
+
         for img_path in converted_image_paths:
             with GlmOcr(mode="maas", api_key=os.getenv("ZAI_API_KEY")) as parser:
                 parse_result = parser.parse(img_path)
@@ -66,12 +96,13 @@ def process(input_path: str, upload_func: Optional[Callable[[bytes, Optional[str
                     for img_name, img in parsed_image_files.items():
                         uploaded_image_url = upload_func(image_to_binary(img, "PNG"), img_name)
                         parsed_markdown_result = parsed_markdown_result.replace(f"imgs/{img_name}", uploaded_image_url)
-                    markdown_content += parsed_markdown_result + "\n\n"
-        print("pdf to markdown conversion complete")
+
+                markdown_content += parsed_markdown_result + "\n\n"
+        print(f"pdf to markdown conversion complete")
         return markdown_content
     except Exception as e:
         print(f"Error converting PDF to PNG: {str(e)}")
-        return f"Failed to convert PDF to PNG: {str(input_path)}"
+        raise e
     finally:
         if os.path.exists(tmpdir):
             import shutil
@@ -134,8 +165,3 @@ def image_to_binary(image, image_format):
     # 关闭缓冲区
     buffer.close()
     return binary_data
-
-
-if __name__ == "__main__":
-    md_file = pdf_to_markdown("C:\\Users\\hujinhua\\Downloads\\学科网资料2024072901(9)份\\第1讲 测量和机械运动（集训本）-【学海风暴·PK中考】2024中考物理备考（江西专用）\\第1讲 测量和机械运动.pdf")
-    print(md_file)

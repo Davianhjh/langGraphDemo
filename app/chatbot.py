@@ -1,7 +1,7 @@
 import os
 from typing import Annotated, Optional
 
-from langchain_core.messages import SystemMessage, AIMessage
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.redis import RedisSaver
 from langgraph.constants import START, END
@@ -100,19 +100,7 @@ def init_graph():
         checkpointer.setup()
 
         def call_llm_with_tools(state: State):
-            pending = state.get("pending_tool_name")
-            if pending:
-                sys = SystemMessage(
-                    content=f"You are an assistant with access to tools."
-                            f"You must continue the pending tool call: {state['pending_tool_name']}.\n"
-                            f"Current args (may be incomplete): {state.get('pending_tool_args')}\n"
-                            f"Missing fields: {state.get('missing_fields')}\n"
-                            f"If user provided missing fields, call the tool now."
-                )
-                msg = [sys] + state["messages"]
-            else:
-                msg = state["messages"]
-            return {"messages": [llm_with_tools.invoke(msg)]}
+            return {"messages": [llm_with_tools.invoke(state["messages"])]}
 
     graph_builder = StateGraph(State)
     # chatbot node
@@ -156,7 +144,7 @@ def stream_graph_updates(graph, user_input: str):
     }
 
     for event in graph.stream({"messages": [("system",
-                                             f"你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。并能够判断用户的意图和自己的工具能力匹配时，无论是否缺少参数，优先执行工具调用。"),
+                                             f"你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。并能够判断用户的意图和自己的工具能力匹配时，优先执行工具调用。"),
                                             ("user", user_input)]}, config, stream_mode="updates"):
         if "chatbot" in event:
             chatbot_message = event["chatbot"]["messages"][-1]
