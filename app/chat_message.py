@@ -3,8 +3,7 @@ from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-# MySQL's persistence configuration (populated by init_mysql_from_env)
-_db_config: Dict[str, Any] = {}
+from db.mysql import mysql_pool
 
 
 def _now_ts() -> float:
@@ -44,52 +43,6 @@ def _message_to_record(message: Any) -> Dict[str, Any]:
     }
 
 
-# ----------------- MySQL persistence helpers -----------------
-def init_mysql_from_env(prefix: str = "MYSQL_") -> None:
-    """
-    从环境变量读取 MySQL 配置并确保消息表存在。
-
-    支持的环境变量：MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB
-    """
-    import os
-    global _db_config
-    host = os.getenv(prefix + "HOST", "localhost")
-    port = int(os.getenv(prefix + "PORT", "3306"))
-    user = os.getenv(prefix + "USER", "root")
-    password = os.getenv(prefix + "PASSWORD", "")
-    db = os.getenv(prefix + "DB", "langgraph")
-
-    _db_config = {
-        "host": host,
-        "port": port,
-        "user": user,
-        "password": password,
-        "db": db,
-        "charset": "utf8mb4",
-    }
-
-
-def _get_conn():
-    """建立并返回一个 pymysql 连接（按需导入 pymysql）。"""
-    import pymysql
-    cfg = _db_config
-    if not cfg:
-        raise RuntimeError("MySQL is not initialized.")
-    return pymysql.connect(
-        host=cfg.get("host"),
-        port=cfg.get("port", 3306),
-        user=cfg.get("user"),
-        password=cfg.get("password"),
-        database=cfg.get("db"),
-        charset=cfg.get("charset", "utf8mb4"),
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False,
-        connect_timeout=5,
-        read_timeout=30,
-        write_timeout=30,
-    )
-
-
 def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) -> int:
     """
     在单个数据库事务中批量持久化 messages 列表（按顺序），返回实际插入的行数。
@@ -110,12 +63,12 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
             message_id = rec.get("id")
             rows.append((user_id, thread_id, role, content, message_id))
 
-    conn = _get_conn()
     try:
-        with conn.cursor() as cur:
-            sql = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
-            cur.executemany(sql, rows)
-            affected = cur.rowcount or 0
+        with mysql_pool.connection(timeout=5) as conn:
+            with conn.cursor() as cur:
+                sql = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
+                cur.executemany(sql, rows)
+                affected = cur.rowcount or 0
         conn.commit()
         return affected
     finally:

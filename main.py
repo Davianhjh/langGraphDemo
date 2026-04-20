@@ -1,12 +1,14 @@
 from typing import Literal, Optional
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
+from app import chat_summary
 from app.chat_bot import init_graph
+from db.mysql import mysql_pool
 
 app = FastAPI()
 lang_app = init_graph()
@@ -76,6 +78,54 @@ def chat(req: ChatRequest):
         media_type="text/event-stream",
         headers={"X-Thread-Id": thread_id},
     )
+
+
+@app.get("/history")
+def history(user_id: Optional[str] = None):
+    """返回 user_id 对应的会话列表：
+    - 如果 chat_dialogs.added_new 为 0，直接返回 id, thread_id, dialog_title
+    - 如果 added_new 不为0，查询 chat_messages，生成会话标题并写回 chat_dialogs 后返回
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    dialogs = []
+    with mysql_pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, thread_id, dialog_title, added_new FROM chat_dialogs WHERE user_id=%s", (user_id,))
+            rows = cur.fetchall()
+            for row in rows:
+                if 0 == row.get("added_new"):
+                    dialogs.append({"id": row["id"], "thread_id": row["thread_id"], "dialog_title": row.get("dialog_title")})
+                else:
+                    thread_id = row.get("thread_id")
+                    # fetch messages for the thread
+                    cur.execute("SELECT role, content FROM chat_messages WHERE thread_id=%s ORDER BY id ASC", (thread_id,))
+                    msgs = cur.fetchall()
+                    if msgs:
+                        from app import chat_summary as chat_summary_module
+
+                        msgs_for_title = []
+                        for m in msgs:
+                            msgs_for_title.append(chat_summary_module.Message(role=m.get("role"), content=m.get("content")))
+
+                        if msgs_for_title:
+                            try:
+                                title_res = chat_summary.generate_session_title(msgs_for_title)
+                                new_title = title_res.get("final_title") or ""
+                                if new_title:
+                                    cur.execute("UPDATE chat_dialogs SET dialog_title=%s, added_new=%s WHERE id=%s",
+                                                (new_title, 0, row.get("id")))
+                            except Exception as e:
+                                # on failure, keep existing title
+                                print(f"Error generating title for thread={thread_id}: {e}")
+                                new_title = row.get("dialog_title") or ""
+                        else:
+                            new_title = row.get("dialog_title") or ""
+
+                        dialogs.append({"id": row.get("id"), "thread_id": thread_id, "dialog_title": new_title})
+
+    return {"dialogs": dialogs}
 
 
 if __name__ == "__main__":

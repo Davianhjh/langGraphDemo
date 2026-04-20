@@ -10,7 +10,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
-from app.chat_message import init_mysql_from_env, persist_messages_batch
+from app.chat_message import persist_messages_batch
 from tools.tool_router import tools, tool_required_args
 
 
@@ -108,12 +108,6 @@ def route_after_decision(state: State) -> str:
 
 def init_graph():
     """Initialize and compile the StateGraph with chatbot and tools nodes."""
-    # Initialize optional MySQL persistence from environment if configured
-    try:
-        init_mysql_from_env()
-    except Exception as e:
-        print(f"Warning: init_mysql_from_env failed: {e}")
-
     llm_with_tools = create_llm()
     with RedisSaver.from_conn_string(os.getenv("REDIS_URL", "redis://localhost:6379"), ttl={
         "default_ttl": 60,  # Expire checkpoints after 60 minutes
