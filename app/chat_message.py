@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-# MySQL persistence configuration (populated by init_mysql_from_env)
+# MySQL's persistence configuration (populated by init_mysql_from_env)
 _db_config: Dict[str, Any] = {}
 
 
@@ -90,10 +90,12 @@ def _get_conn():
     )
 
 
-def persist_messages_batch(thread_id: str, messages: List[Any]) -> int:
+def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) -> int:
     """
     在单个数据库事务中批量持久化 messages 列表（按顺序），返回实际插入的行数。
     """
+    if not user_id:
+        raise ValueError("user_id is required to persist messages")
     if not thread_id:
         raise ValueError("thread_id is required to persist messages")
     if not messages:
@@ -106,12 +108,12 @@ def persist_messages_batch(thread_id: str, messages: List[Any]) -> int:
         if 'ai' == role or 'human' == role:
             content = rec.get("content")
             message_id = rec.get("id")
-            rows.append((thread_id, role, content, message_id))
+            rows.append((user_id, thread_id, role, content, message_id))
 
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
-            sql = "INSERT IGNORE INTO chat_messages (thread_id, role, content, message_id) VALUES (%s, %s, %s, %s)"
+            sql = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
             cur.executemany(sql, rows)
             affected = cur.rowcount or 0
         conn.commit()

@@ -34,6 +34,7 @@ def tavily_search(query: str) -> str:
             tavily_api_key=api_key,
             max_results=10
         )
+        print("execute TavilySearch query:", query)
         return search_tool.invoke(query)
     except Exception as e:
         # 返回错误字符串，便于作为工具调用时模型理解失败原因

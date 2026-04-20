@@ -15,6 +15,7 @@ from tools.tool_router import tools, tool_required_args
 
 
 class State(TypedDict, total=False):
+    user_id: Optional[str]
     thread_id: Optional[str]
     messages: Annotated[list, add_messages]
     pending_tool_name: Optional[str]
@@ -38,6 +39,7 @@ def decision_node(state: State) -> State:
     # 没有工具调用：清理 pending，直接结束
     if not tool_calls:
         return {
+            "user_id": state.get("user_id"),
             "thread_id": state.get("thread_id"),
             "messages": state["messages"],
             "pending_tool_name": None,
@@ -56,6 +58,7 @@ def decision_node(state: State) -> State:
     # 缺参：保存 pending，后面交给 request_missing 追问
     if missing:
         return {
+            "user_id": state.get("user_id"),
             "thread_id": state.get("thread_id"),
             "messages": state["messages"],
             "pending_tool_name": tool_name,
@@ -66,6 +69,7 @@ def decision_node(state: State) -> State:
     else:
         # 参数齐：清掉 pending，让它去 tools node 执行
         return {
+            "user_id": state.get("user_id"),
             "thread_id": state.get("thread_id"),
             "messages": state["messages"],
             "pending_tool_name": None,
@@ -82,6 +86,7 @@ def request_missing_node(state: State) -> State:
         parts.append(f"- 文件路径（file_path）：请提供文件地址/绝对路径")
 
     return {
+        "user_id": state.get("user_id"),
         "thread_id": state.get("thread_id"),
         "messages": [AIMessage(content="\n".join(parts))],
         "pending_tool_args": state.get("pending_tool_args"),
@@ -128,21 +133,26 @@ def init_graph():
             start_to_persist = last_idx + 1
             new_last_idx = last_idx
 
+            user_id = state.get("user_id")
             thread_id = state.get("thread_id")
             if thread_id is not None and start_to_persist <= len(new_msgs) - 1:
-                to_persist = new_msgs[start_to_persist:]
+                to_persist = []
+                for msg in new_msgs[start_to_persist:]:
+                    if msg.content:
+                        to_persist.append(msg)
                 try:
                     # batch insert in one transaction
-                    persist_messages_batch(thread_id, to_persist)
+                    persist_messages_batch(user_id, thread_id, to_persist)
                     # treat as success (duplicates are ignored by DB)
                     new_last_idx = len(new_msgs) - 1
                 except Exception as e:
                     # on failure, leave last_idx unchanged
-                    print(f"Error persisting messages for thread {thread_id}: {e}")
+                    print(f"Error persisting messages for user={user_id} thread={thread_id}: {e}")
                     new_last_idx = last_idx
 
             # return assistant message, thread_id and updated last_persisted_idx so state is preserved
             return {
+                "user_id": user_id,
                 "thread_id": thread_id,
                 "messages": [ai_msg],
                 "pending_tool_name": None,
@@ -188,7 +198,8 @@ def stream_graph_updates(graph, user_input: str):
     """
     config = {
         "configurable": {
-            "thread_id": "1"
+            "thread_id": "1",
+            "user_id": "user_123",
         }
     }
 
@@ -198,6 +209,7 @@ def stream_graph_updates(graph, user_input: str):
                       ("user", user_input)],
         # Include thread_id at top-level and inside configurable so nodes can pick it up
         "thread_id": config.get("configurable", {}).get("thread_id") if isinstance(config, dict) else None,
+        "user_id": config.get("configurable", {}).get("user_id") if isinstance(config, dict) else None,
     }
 
     for event in graph.stream(initial_state, config, stream_mode="updates"):

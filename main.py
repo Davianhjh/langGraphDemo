@@ -52,7 +52,7 @@ def chat(req: ChatRequest):
     }
 
     # 关键：把 thread_id 交给 checkpointer，用于恢复/续写同一条对话
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
 
     def event_gen():
         try:

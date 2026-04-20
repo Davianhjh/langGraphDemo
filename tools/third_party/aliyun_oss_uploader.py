@@ -31,9 +31,9 @@ def upload_file(file_bytes: bytes, filename: Optional[str] = None) -> str:
     """
     access_key_id = os.getenv('OSS_ACCESS_KEY_ID', os.getenv("OSS_ACCESS_KEY_ID"))
     access_key_secret = os.getenv('OSS_ACCESS_KEY_SECRET', os.getenv("OSS_ACCESS_KEY_SECRET"))
-    bucket_name = os.getenv('OSS_BUCKET_NAME', 'davian-files')
-    endpoint = os.getenv('OSS_ENDPOINT', 'oss-cn-hangzhou.aliyuncs.com')
-    prefix = os.getenv('OSS_OBJECT_PREFIX', 'uploads/')
+    bucket_name = os.getenv('OSS_BUCKET_NAME', 'davian-oss-files')
+    endpoint = os.getenv('OSS_ENDPOINT', 'oss-cn-shanghai.aliyuncs.com')
+    prefix = os.getenv('OSS_OBJECT_PREFIX', 'chat-agent/')
 
     missing = [name for name, val in (
         ('OSS_ACCESS_KEY_ID', access_key_id),
