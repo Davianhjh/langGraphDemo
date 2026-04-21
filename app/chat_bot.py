@@ -123,7 +123,54 @@ def init_graph():
             new_msgs = msgs + [ai_msg]
 
             # compute the slice to persist
-            last_idx = state.get("last_persisted_idx") or -1
+            # Prefer explicit value from state (allow 0); if missing then try to load from checkpointer
+            last_idx = state.get("last_persisted_idx", None)
+            if last_idx is None:
+                # attempt to read from checkpointer using thread_id as key
+                last_idx = -1
+                thread_id_for_cp = state.get("thread_id")
+                if thread_id_for_cp:
+                    import json
+
+                    cp_val = None
+                    # try common method names that checkpointer implementations might expose
+                    for method_name in ("get_checkpoint", "get", "read", "load", "load_checkpoint", "fetch"):
+                        fn = getattr(checkpointer, method_name, None)
+                        if callable(fn):
+                            try:
+                                # try calling with thread_id
+                                cp_val = fn(thread_id_for_cp)
+                            except TypeError:
+                                # maybe signature requires no args; try calling without
+                                try:
+                                    cp_val = fn()
+                                except Exception:
+                                    cp_val = None
+                            except Exception:
+                                cp_val = None
+                            if cp_val:
+                                break
+
+                    # parse returned checkpoint value
+                    cp_json = None
+                    if isinstance(cp_val, dict):
+                        cp_json = cp_val
+                    elif isinstance(cp_val, (bytes, str)):
+                        try:
+                            cp_json = json.loads(cp_val)
+                        except Exception:
+                            cp_json = None
+
+                    if isinstance(cp_json, dict):
+                        # try top-level key, or inside a `state` dict
+                        if "last_persisted_idx" in cp_json:
+                            last_idx = cp_json.get("last_persisted_idx")
+                        elif isinstance(cp_json.get("state"), dict) and "last_persisted_idx" in cp_json.get("state"):
+                            last_idx = cp_json.get("state").get("last_persisted_idx")
+                        else:
+                            # no useful value found; keep default -1
+                            last_idx = -1
+
             start_to_persist = last_idx + 1
             new_last_idx = last_idx
 
