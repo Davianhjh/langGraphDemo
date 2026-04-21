@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 import uvicorn
 from fastapi import FastAPI, BackgroundTasks, HTTPException
@@ -22,6 +22,38 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
     user_id: Optional[str] = None
     messages: list[ChatMessage]
+
+
+# 新增响应模型
+class HistoryDialog(BaseModel):
+    id: int
+    thread_id: str
+    dialog_title: str
+
+
+class HistoryResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    dialogs: List[HistoryDialog]
+
+
+class MessageItem(BaseModel):
+    id: int
+    role: str
+    content: str
+    create_time: str
+
+
+class DialogResponse(BaseModel):
+    messages: List[MessageItem]
+
+
+class DialogListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    messages: List[MessageItem]
 
 
 def sse_data(text: str) -> str:
@@ -79,8 +111,8 @@ def chat(req: ChatRequest):
     )
 
 
-@app.get("/history")
-async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = None, page: int = 1, page_size: int = 20):
+@app.get("/history", response_model=HistoryResponse)
+async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = None, page: int = 1, page_size: int = 10):
     """返回 user_id 对应的会话列表（分页）：
     - 如果 chat_dialogs.added_new 为 0，直接返回 id, thread_id, dialog_title
     - 如果 added_new 不为0，查询 chat_messages，生成会话标题并写回 chat_dialogs 后返回
@@ -91,8 +123,8 @@ async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = No
         raise HTTPException(status_code=400, detail="user_id is required")
     if page < 1:
         page = 1
-    if page_size < 1 or page_size > 20:
-        page_size = 20
+    if page_size < 1 or page_size > 10:
+        page_size = 10
 
     offset = (page - 1) * page_size
 
@@ -105,17 +137,21 @@ async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = No
             total = total_row.get("cnt") if total_row else 0
 
             # fetch paginated dialogs
-            cur.execute("SELECT id, thread_id, dialog_title, added_new FROM chat_dialogs WHERE user_id=%s ORDER BY updated_at DESC LIMIT %s OFFSET %s", (user_id, page_size, offset))
+            cur.execute(
+                "SELECT id, thread_id, dialog_title, added_new FROM chat_dialogs WHERE user_id=%s ORDER BY updated_at DESC LIMIT %s OFFSET %s",
+                (user_id, page_size, offset))
             rows = cur.fetchall()
 
             for row in rows:
                 if 0 == row.get("added_new"):
-                    dialogs.append({"id": row["id"], "thread_id": row["thread_id"], "dialog_title": row.get("dialog_title")})
+                    dialogs.append(
+                        {"id": row["id"], "thread_id": row["thread_id"], "dialog_title": row.get("dialog_title")})
                 else:
                     dialog_id = row.get("id")
                     thread_id = row.get("thread_id")
                     # fetch messages for the thread
-                    cur.execute("SELECT role, content FROM chat_messages WHERE thread_id=%s ORDER BY id ASC", (thread_id,))
+                    cur.execute("SELECT role, content FROM chat_messages WHERE thread_id=%s ORDER BY id ASC",
+                                (thread_id,))
                     msgs = cur.fetchall()
                     if msgs:
                         from app.chat_summary import Message
@@ -133,6 +169,76 @@ async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = No
                         dialogs.append({"id": dialog_id, "thread_id": thread_id, "dialog_title": ""})
 
     return {"total": total, "page": page, "page_size": page_size, "dialogs": dialogs}
+
+
+@app.get("/dialog", response_model=DialogListResponse)
+async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None, page: int = 1, page_size: int = 10):
+    """查询会话的所有消息（按 id 升序）并返回结构化 JSON 列表。
+
+    Query 参数（必填）:
+    - user_id: 用户 ID
+    - thread_id: 会话 ID
+
+    返回格式:
+    {
+      "messages": [
+        {"id": <int>, "role": <str>, "content": <str>, "create_time": "yyyy-MM-dd HH:mm:ss"},
+        ...
+      ]
+    }
+
+    说明：
+    - 如果数据库中的 content/created_at 为 NULL，会分别返回空字符串。
+    """
+    # 必填校验
+    if not user_id or not thread_id:
+        raise HTTPException(status_code=400, detail="user_id and thread_id are required")
+
+    # sanitize pagination
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 10:
+        page_size = 10
+
+    offset = (page - 1) * page_size
+
+    messages = []
+    with mysql_pool.connection() as conn:
+        with conn.cursor() as cur:
+            # total count
+            cur.execute(
+                "SELECT COUNT(*) as cnt FROM chat_messages WHERE user_id=%s AND thread_id=%s",
+                (user_id, thread_id),
+            )
+            cnt_row = cur.fetchone()
+            total = cnt_row.get("cnt") if cnt_row else 0
+
+            # fetch paginated messages
+            cur.execute(
+                "SELECT id, role, content, created_at FROM chat_messages WHERE user_id=%s AND thread_id=%s ORDER BY id DESC LIMIT %s OFFSET %s",
+                (user_id, thread_id, page_size, offset),
+            )
+            rows = cur.fetchall()
+
+            for r in rows:
+                created_at = r.get("created_at")
+                if created_at:
+                    try:
+                        create_time = created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        # 如果类型不是 datetime，兜底转换为字符串
+                        create_time = str(created_at)
+                else:
+                    create_time = ""
+
+                messages.append({
+                    "id": r.get("id"),
+                    "role": r.get("role"),
+                    "content": r.get("content") or "",
+                    "create_time": create_time,
+                })
+
+    return {"total": total, "page": page, "page_size": page_size, "messages": messages}
 
 
 if __name__ == "__main__":

@@ -61,6 +61,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
         return 0
 
     rows = []
+    first_human_message = ""
     for m in messages:
         rec = _message_to_record(m)
         role = rec["role"]
@@ -68,6 +69,8 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
             content = rec.get("content")
             message_id = rec.get("id")
             rows.append((user_id, thread_id, role, content, message_id))
+            if 'human' == role and not first_human_message:
+                first_human_message = content
 
     if not rows:
         return 0
@@ -76,34 +79,39 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
         with conn.cursor() as cur:
             sql1 = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
             cur.executemany(sql1, rows)
+            conn.commit()
             affected = cur.rowcount or 0
 
             # 如果有新插入的消息，将 chat_dialogs.added_new 置为 1，限定 thread_id + user_id
             if affected > 0:
                 sql2 = "SELECT id FROM chat_dialogs WHERE thread_id=%s AND user_id=%s for update"
                 dialog_id = cur.execute(sql2, (thread_id, user_id))
-                if dialog_id:
-                    cur.execute("UPDATE chat_dialogs SET added_new=%s WHERE id=%s", (1, dialog_id))
-                else:
-                    cur.execute("INSERT INTO chat_dialogs (user_id, thread_id, dialog_title, added_new) VALUES (%s, %s, %s, %s)",
-                                (user_id, thread_id, messages[0].get("content", "")[:20], 0))
+                if not dialog_id:
+                    cur.execute(
+                        "INSERT INTO chat_dialogs (user_id, thread_id, dialog_title, added_new) VALUES (%s, %s, %s, %s)",
+                        (user_id, thread_id, first_human_message[:64], 0))
                 try:
-                    cur.execute("UPDATE chat_dialogs SET added_new=%s WHERE thread_id=%s AND user_id=%s", (1, thread_id, user_id))
+                    cur.execute("UPDATE chat_dialogs SET added_new=%s WHERE thread_id=%s AND user_id=%s",
+                                (1, thread_id, user_id))
                 except Exception:
                     # 不要让更新标题的错误阻断消息持久化结果，记录在日志里
                     print(f"Warning: failed to update added_new for thread_id={thread_id} user_id={user_id}")
+                conn.commit()
     return affected
 
 
 async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[Message]) -> str:
     if messages:
         try:
+            print(f"start generating title for dialog_id={dialog_id} thread={thread_id} with {len(messages)} messages")
             title_res = await generate_session_title(messages)
             new_title = title_res.get("final_title") or ""
             if new_title:
                 with mysql_pool.connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("UPDATE chat_dialogs SET dialog_title=%s, added_new=%s WHERE id=%s", (new_title, 0, dialog_id))
+                        cur.execute("UPDATE chat_dialogs SET dialog_title=%s, added_new=%s WHERE id=%s",
+                                    (new_title, 0, dialog_id))
+                        conn.commit()
                         return new_title
         except Exception as e:
             print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
