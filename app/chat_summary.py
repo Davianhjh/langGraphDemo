@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import List, Dict, Any, Tuple
+import asyncio
 
 
 @dataclass
@@ -16,7 +17,7 @@ class Chunk:
     token_estimate: int
 
 
-def generate_session_title(
+async def generate_session_title(
         messages: List[Message],
         chunk_target_tokens: int = 8000,
         chunk_overlap_tokens: int = 500,
@@ -34,7 +35,7 @@ def generate_session_title(
     records = []
 
     for c in chunks:
-        t = title_for_chunk(c)
+        t = await asyncio.to_thread(title_for_chunk, c)
         chunk_titles.append((c.chunk_id, t))
         records.append({"chunk_id": c.chunk_id, "token_estimate": c.token_estimate, "title": t})
 
@@ -44,10 +45,10 @@ def generate_session_title(
         next_level = []
         for i in range(0, len(titles_level), section_group_size):
             group = titles_level[i: i + section_group_size]
-            next_level.append(reduce_titles(group))
+            next_level.append(await asyncio.to_thread(reduce_titles, group))
         titles_level = next_level
 
-    final_title = reduce_titles(titles_level) if len(titles_level) > 1 else titles_level[0]
+    final_title = await asyncio.to_thread(reduce_titles, titles_level) if len(titles_level) > 1 else titles_level[0]
 
     # 保险：再次截断（防止模型偶尔超字数）
     final_title = final_title.strip()
@@ -200,6 +201,8 @@ def call_llm_glm(
 
 
 if __name__ == "__main__":
+    import asyncio as _asyncio
+
     msgs = [
         Message(role="user", content="你好，想聊聊怎么提高学习效率。"),
         Message(role="assistant", content="可以从目标拆解、番茄钟和复盘开始。"),
@@ -207,5 +210,5 @@ if __name__ == "__main__":
         Message(role="assistant", content="向量数据库用于存储向量并做相似度检索。"),
     ]
 
-    result = generate_session_title(msgs)
+    result = _asyncio.run(generate_session_title(msgs))
     print(result["final_title"])

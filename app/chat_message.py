@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from app.chat_summary import Message, generate_session_title
 from db.mysql import mysql_pool
 
 
@@ -73,3 +74,16 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
         return affected
     finally:
         conn.close()
+
+
+async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[Message]):
+    if messages:
+        try:
+            title_res = await generate_session_title(messages)
+            new_title = title_res.get("final_title") or ""
+            if new_title:
+                with mysql_pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE chat_dialogs SET dialog_title=%s, added_new=%s WHERE id=%s", (new_title, 0, dialog_id))
+        except Exception as e:
+            print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
