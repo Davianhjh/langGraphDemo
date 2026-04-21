@@ -76,7 +76,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
         conn.close()
 
 
-async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[Message]):
+async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[Message]) -> str:
     if messages:
         try:
             title_res = await generate_session_title(messages)
@@ -85,5 +85,7 @@ async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[M
                 with mysql_pool.connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("UPDATE chat_dialogs SET dialog_title=%s, added_new=%s WHERE id=%s", (new_title, 0, dialog_id))
+                        return new_title
         except Exception as e:
             print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
+    return ""

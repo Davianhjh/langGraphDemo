@@ -107,8 +107,9 @@ def group_into_turns(messages: List[Message]) -> List[List[Message]]:
     turns: List[List[Message]] = []
     cur: List[Message] = []
     for m in messages:
-        if m.role == "user" and cur:
-            turns.append(cur)
+        if m.role == "human":
+            if cur:
+                turns.append(cur)
             cur = [m]
         else:
             cur.append(m)

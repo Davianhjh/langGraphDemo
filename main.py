@@ -1,7 +1,7 @@
 from typing import Literal, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
@@ -80,7 +80,7 @@ def chat(req: ChatRequest):
 
 
 @app.get("/history")
-async def history(user_id: Optional[str] = None):
+async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = None):
     """返回 user_id 对应的会话列表：
     - 如果 chat_dialogs.added_new 为 0，直接返回 id, thread_id, dialog_title
     - 如果 added_new 不为0，查询 chat_messages，生成会话标题并写回 chat_dialogs 后返回
@@ -103,16 +103,16 @@ async def history(user_id: Optional[str] = None):
                     cur.execute("SELECT role, content FROM chat_messages WHERE thread_id=%s ORDER BY id ASC", (thread_id,))
                     msgs = cur.fetchall()
                     if msgs:
-                        new_msg = msgs[-1]
-                        dialogs.append({"id": row.get("id"), "thread_id": thread_id, "dialog_title": new_msg.content[:20]})
-
                         from app.chat_summary import Message
                         from app.chat_message import summary_chat_messages
 
                         msgs_for_title = []
                         for m in msgs:
                             msgs_for_title.append(Message(role=m.get("role"), content=m.get("content")))
-                        await summary_chat_messages(dialog_id, thread_id, msgs_for_title)
+                        background_tasks.add_task(summary_chat_messages, dialog_id, thread_id, msgs_for_title)
+
+                        dialog_title = row.get("dialog_title") or ""
+                        dialogs.append({"id": row.get("id"), "thread_id": thread_id, "dialog_title": dialog_title})
 
                     else:
                         dialogs.append({"id": dialog_id, "thread_id": thread_id, "dialog_title": ""})
