@@ -80,19 +80,34 @@ def chat(req: ChatRequest):
 
 
 @app.get("/history")
-async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = None):
-    """返回 user_id 对应的会话列表：
+async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = None, page: int = 1, page_size: int = 20):
+    """返回 user_id 对应的会话列表（分页）：
     - 如果 chat_dialogs.added_new 为 0，直接返回 id, thread_id, dialog_title
     - 如果 added_new 不为0，查询 chat_messages，生成会话标题并写回 chat_dialogs 后返回
+
+    返回结构：{"total": int, "page": int, "page_size": int, "dialogs": [...]}
     """
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
+    if page < 1:
+        page = 1
+    if page_size < 1 or page_size > 20:
+        page_size = 20
+
+    offset = (page - 1) * page_size
 
     dialogs = []
     with mysql_pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, thread_id, dialog_title, added_new FROM chat_dialogs WHERE user_id=%s ORDER BY id DESC", (user_id,))
+            # total count
+            cur.execute("SELECT COUNT(*) as cnt FROM chat_dialogs WHERE user_id=%s", (user_id,))
+            total_row = cur.fetchone()
+            total = total_row.get("cnt") if total_row else 0
+
+            # fetch paginated dialogs
+            cur.execute("SELECT id, thread_id, dialog_title, added_new FROM chat_dialogs WHERE user_id=%s ORDER BY updated_at DESC LIMIT %s OFFSET %s", (user_id, page_size, offset))
             rows = cur.fetchall()
+
             for row in rows:
                 if 0 == row.get("added_new"):
                     dialogs.append({"id": row["id"], "thread_id": row["thread_id"], "dialog_title": row.get("dialog_title")})
@@ -117,7 +132,7 @@ async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = No
                     else:
                         dialogs.append({"id": dialog_id, "thread_id": thread_id, "dialog_title": ""})
 
-    return {"dialogs": dialogs}
+    return {"total": total, "page": page, "page_size": page_size, "dialogs": dialogs}
 
 
 if __name__ == "__main__":

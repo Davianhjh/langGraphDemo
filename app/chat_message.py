@@ -47,6 +47,11 @@ def _message_to_record(message: Any) -> Dict[str, Any]:
 def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) -> int:
     """
     在单个数据库事务中批量持久化 messages 列表（按顺序），返回实际插入的行数。
+
+    行为说明：
+    - 使用 INSERT IGNORE 批量插入 chat_messages 表（防止重复 message_id 引发错误）
+    - 如果插入了新行（affected > 0），会将对应的 chat_dialogs.added_new 设为 1，条件使用 (thread_id, user_id)
+    - 函数在失败时尽量保证连接关闭并将异常上抛
     """
     if not user_id:
         raise ValueError("user_id is required to persist messages")
@@ -64,16 +69,30 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
             message_id = rec.get("id")
             rows.append((user_id, thread_id, role, content, message_id))
 
-    try:
-        with mysql_pool.connection(timeout=5) as conn:
-            with conn.cursor() as cur:
-                sql = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
-                cur.executemany(sql, rows)
-                affected = cur.rowcount or 0
-        conn.commit()
-        return affected
-    finally:
-        conn.close()
+    if not rows:
+        return 0
+
+    with mysql_pool.connection(timeout=5) as conn:
+        with conn.cursor() as cur:
+            sql1 = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
+            cur.executemany(sql1, rows)
+            affected = cur.rowcount or 0
+
+            # 如果有新插入的消息，将 chat_dialogs.added_new 置为 1，限定 thread_id + user_id
+            if affected > 0:
+                sql2 = "SELECT id FROM chat_dialogs WHERE thread_id=%s AND user_id=%s for update"
+                dialog_id = cur.execute(sql2, (thread_id, user_id))
+                if dialog_id:
+                    cur.execute("UPDATE chat_dialogs SET added_new=%s WHERE id=%s", (1, dialog_id))
+                else:
+                    cur.execute("INSERT INTO chat_dialogs (user_id, thread_id, dialog_title, added_new) VALUES (%s, %s, %s, %s)",
+                                (user_id, thread_id, messages[0].get("content", "")[:20], 0))
+                try:
+                    cur.execute("UPDATE chat_dialogs SET added_new=%s WHERE thread_id=%s AND user_id=%s", (1, thread_id, user_id))
+                except Exception:
+                    # 不要让更新标题的错误阻断消息持久化结果，记录在日志里
+                    print(f"Warning: failed to update added_new for thread_id={thread_id} user_id={user_id}")
+    return affected
 
 
 async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[Message]) -> str:
