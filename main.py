@@ -129,7 +129,7 @@ async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = No
     offset = (page - 1) * page_size
 
     dialogs = []
-    with mysql_pool.connection() as conn:
+    with mysql_pool.connection(timeout=5) as conn:
         with conn.cursor() as cur:
             # total count
             cur.execute("SELECT COUNT(*) as cnt FROM chat_dialogs WHERE user_id=%s", (user_id,))
@@ -167,7 +167,7 @@ async def history(background_tasks: BackgroundTasks, user_id: Optional[str] = No
 
                     else:
                         dialogs.append({"id": dialog_id, "thread_id": thread_id, "dialog_title": ""})
-
+        conn.close()
     return {"total": total, "page": page, "page_size": page_size, "dialogs": dialogs}
 
 
@@ -203,7 +203,7 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
     offset = (page - 1) * page_size
 
     messages = []
-    with mysql_pool.connection() as conn:
+    with mysql_pool.connection(timeout=5) as conn:
         with conn.cursor() as cur:
             # total count
             cur.execute(
@@ -237,6 +237,7 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
                     "content": r.get("content") or "",
                     "create_time": create_time,
                 })
+        conn.close()
 
     return {"total": total, "page": page, "page_size": page_size, "messages": messages}
 

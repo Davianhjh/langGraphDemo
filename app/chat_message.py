@@ -1,4 +1,5 @@
 import time
+import hashlib
 from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -97,22 +98,37 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
                     # 不要让更新标题的错误阻断消息持久化结果，记录在日志里
                     print(f"Warning: failed to update added_new for thread_id={thread_id} user_id={user_id}")
                 conn.commit()
+        conn.close()
     return affected
 
 
 async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[Message]) -> str:
-    if messages:
-        try:
-            print(f"start generating title for dialog_id={dialog_id} thread={thread_id} with {len(messages)} messages")
-            title_res = await generate_session_title(messages)
-            new_title = title_res.get("final_title") or ""
-            if new_title:
-                with mysql_pool.connection() as conn:
-                    with conn.cursor() as cur:
+    if not messages:
+        return ""
+
+    lock_name = "summary_lock_" + hashlib.sha1(thread_id.encode("utf-8")).hexdigest()
+    new_title = ""
+    with mysql_pool.connection(timeout=5) as conn:
+        with conn.cursor() as cur:
+            # 立即尝试获取命名锁（timeout=0），如果获取失败说明已有其他进程在处理，直接返回
+            cur.execute("SELECT GET_LOCK(%s, %s) as got", (lock_name, 0))
+            row = cur.fetchone()
+            got = row.get("got") if row else 0
+            if got != 1:
+                # 未获取到锁，说明已有并发任务在处理该 thread_id，跳过
+                print(f"summary already running for thread_id={thread_id}, skip")
+            else:
+                # 成功获取锁，开始生成会话标题
+                try:
+                    print(f"start generating title for dialog_id={dialog_id} thread={thread_id} with {len(messages)} messages")
+                    title_res = await generate_session_title(messages)
+                    new_title = title_res.get("final_title") or ""
+                    if new_title:
                         cur.execute("UPDATE chat_dialogs SET dialog_title=%s, added_new=%s WHERE id=%s",
                                     (new_title, 0, dialog_id))
                         conn.commit()
-                        return new_title
-        except Exception as e:
-            print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
-    return ""
+                except Exception as e:
+                    print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
+        conn.close()
+    return new_title
+
