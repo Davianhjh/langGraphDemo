@@ -1,6 +1,7 @@
-from typing import Literal, Optional, List
-
 import os
+from typing import Literal, Optional, List
+import json
+
 import uvicorn
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
@@ -14,12 +15,14 @@ from tools.third_party.aliyun_oss_uploader import upload_file as oss_upload_file
 app = FastAPI()
 lang_app = init_graph()
 
+
 class ChatFile(BaseModel):
     file_url: str
     file_name: str
     file_ext: str
     mime_type: str
     file_size: int
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "tool"]
@@ -52,6 +55,7 @@ class MessageItem(BaseModel):
     role: str
     content: str
     create_time: str
+    files: Optional[List[ChatFile]] = None
 
 
 class DialogResponse(BaseModel):
@@ -235,7 +239,7 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
 
             # fetch paginated messages
             cur.execute(
-                "SELECT id, role, content, created_at FROM chat_messages WHERE user_id=%s AND thread_id=%s ORDER BY id DESC LIMIT %s OFFSET %s",
+                "SELECT id, role, content, created_at, files FROM chat_messages WHERE user_id=%s AND thread_id=%s ORDER BY id DESC LIMIT %s OFFSET %s",
                 (user_id, thread_id, page_size, offset),
             )
             rows = cur.fetchall()
@@ -251,11 +255,22 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
                 else:
                     create_time = ""
 
+                # parse files column (expected JSON string or already a structure)
+                files_val = r.get("files")
+                files_parsed = None
+                if files_val:
+                    try:
+                        files_parsed = json.loads(files_val)
+                    except Exception:
+                        # fallback: leave as None if parsing fails
+                        files_parsed = None
+
                 messages.append({
                     "id": r.get("id"),
                     "role": r.get("role"),
                     "content": r.get("content") or "",
                     "create_time": create_time,
+                    "files": files_parsed,
                 })
         conn.close()
 
@@ -263,7 +278,7 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
 
 
 @app.post("/upload", response_model=ChatFile)
-async def upload_file_endpoint(user_id: str = Form(...), file: UploadFile = File(...)):
+async def upload(user_id: str = Form(...), file: UploadFile = File(...)):
     """接收 form-data: user_id, file；上传到 Aliyun OSS 并返回结构化信息。
 
     返回 JSON:

@@ -193,7 +193,7 @@ def call_llm_glm(
     llm = ChatOpenAI(
         api_key=os.getenv("OLLAMA_API_KEY"),
         base_url="https://ollama.com/v1",
-        model="glm-5:cloud",
+        model="minimax-m2.7:cloud",
         temperature=0.2,
         max_tokens=60,
         max_retries=3
