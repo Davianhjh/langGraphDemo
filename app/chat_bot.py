@@ -25,6 +25,17 @@ class State(TypedDict, total=False):
     last_persisted_idx: Optional[int]
 
 
+def _is_missing_arg(args: dict, key: str) -> bool:
+    if key not in args:
+        return True
+    value = args.get(key)
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    return False
+
+
 def create_llm():
     llm = ChatOpenAI(
         api_key=os.getenv("OLLAMA_API_KEY"),
@@ -59,17 +70,19 @@ def decision_node(state: State) -> State:
 
     for tool_call in tool_calls:
         tool_name = tool_call["name"]
-        args = tool_call.get("args", {}) or {}
+        args = tool_call.get("args")
+        if not isinstance(args, dict):
+            args = {}
+            tool_call["args"] = args
 
         # 若模型未传 file_path，则按 files 列表顺序自动注入 file_url
-        if "file_path" in tool_required_args.get(tool_name, []) and not args.get("file_path"):
+        if "file_path" in tool_required_args.get(tool_name, []) and _is_missing_arg(args, "file_path"):
             if file_idx < len(file_paths):
                 args["file_path"] = file_paths[file_idx]
-                tool_call["args"] = args
                 file_idx += 1
 
         required_args = tool_required_args.get(tool_name, [])
-        missing = [k for k in required_args if not args.get(k)]
+        missing = [k for k in required_args if _is_missing_arg(args, k)]
         if missing:
             missing_tool_name = tool_name
             missing_args = args

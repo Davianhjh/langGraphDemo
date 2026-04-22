@@ -64,7 +64,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
 
     rows = []
     first_human_message = ""
-    first_human_files_written = False
+    first_human_seen = False
     for m in messages:
         rec = _message_to_record(m)
         role = rec["role"]
@@ -72,7 +72,8 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
             content = rec.get("content")
             message_id = rec.get("id")
             files_json = None
-            if role == "human" and not first_human_files_written:
+            if role == "human" and not first_human_seen:
+                first_human_seen = True
                 raw = rec.get("raw")
                 msg_files = None
                 if hasattr(raw, "additional_kwargs"):
@@ -80,7 +81,6 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
                 if msg_files is not None:
                     try:
                         files_json = json.dumps(msg_files, ensure_ascii=False)
-                        first_human_files_written = True
                     except Exception:
                         files_json = None
 
