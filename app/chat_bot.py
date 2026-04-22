@@ -28,7 +28,7 @@ class State(TypedDict, total=False):
     last_persisted_idx: Optional[int]
 
 
-def _is_missing_arg(args: dict, key: str) -> bool:
+def _is_arg_missing_or_empty(args: dict, key: str) -> bool:
     """Return True when a required tool argument is absent or effectively empty."""
     if key not in args:
         return True
@@ -83,7 +83,7 @@ def decision_node(state: State) -> State:
             tool_call["args"] = args
 
         # 若模型未传 file_path，则按 files 列表顺序自动注入 file_url
-        if "file_path" in required_args and _is_missing_arg(args, "file_path"):
+        if "file_path" in required_args and _is_arg_missing_or_empty(args, "file_path"):
             if file_idx < len(file_paths):
                 args["file_path"] = file_paths[file_idx]
                 logger.info("Injected file_path=%s for tool=%s", args["file_path"], tool_name)
@@ -91,7 +91,7 @@ def decision_node(state: State) -> State:
             else:
                 logger.warning("No remaining file_path to inject for tool=%s", tool_name)
 
-        missing = [k for k in required_args if _is_missing_arg(args, k)]
+        missing = [k for k in required_args if _is_arg_missing_or_empty(args, k)]
         if missing:
             missing_tool_name = tool_name
             missing_args = args

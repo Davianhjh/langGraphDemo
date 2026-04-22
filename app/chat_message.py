@@ -74,7 +74,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
         if 'ai' == role or 'human' == role:
             content = rec.get("content")
             message_id = rec.get("id")
-            files_json = None
+            files_json = ""
             if role == "human" and not first_human_seen:
                 first_human_seen = True
                 raw = rec.get("raw")
@@ -91,7 +91,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
                             type(msg_files).__name__,
                             e,
                         )
-                        files_json = None
+                        files_json = ""
 
             rows.append((user_id, thread_id, role, content, message_id, files_json))
             if 'human' == role and not first_human_message:
