@@ -47,7 +47,7 @@ DOCUMENT_CONVERSION_TOOLS = {
 
 
 def _normalize_file_ext(file_item: dict[str, Any]) -> str:
-    """Normalize extension by file_ext -> file_name -> file_url, stripping URL query parts."""
+    """Extract extension by priority: file_ext, then file_name, then file_url (without query string)."""
     file_ext = str(file_item.get("file_ext") or "").strip().lower().lstrip(".")
     if file_ext:
         return file_ext
@@ -65,7 +65,7 @@ def _normalize_file_ext(file_item: dict[str, Any]) -> str:
 def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build document conversion tool call payloads from files metadata."""
     tool_calls = []
-    for file_index, file_item in enumerate(files, start=1):
+    for file_item in files:
         if not isinstance(file_item, dict):
             continue
         file_path = file_item.get("file_url")
@@ -74,7 +74,7 @@ def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, An
         if not file_path or not tool_name:
             continue
         tool_calls.append({
-            "id": f"auto_doc_{file_index}_{tool_name}_{uuid.uuid4().hex[:8]}",
+            "id": f"auto_doc_{uuid.uuid4().hex[:8]}",
             "name": tool_name,
             "args": {"file_path": file_path},
             "type": "tool_call",
@@ -86,7 +86,7 @@ def _rewrite_document_tool_calls(
         tool_calls: list[dict[str, Any]],
         files: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Replace document-conversion tool calls with extension-routed calls per file."""
+    """Replace document-conversion calls with extension-routed calls; preserve non-document calls."""
     has_document_call = any(
         isinstance(tool_call, dict) and tool_call.get("name") in DOCUMENT_CONVERSION_TOOLS
         for tool_call in tool_calls
