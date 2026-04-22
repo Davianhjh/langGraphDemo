@@ -26,14 +26,7 @@ class State(TypedDict, total=False):
 
 
 def _is_missing_arg(args: dict, key: str) -> bool:
-    if key not in args:
-        return True
-    value = args.get(key)
-    if value is None:
-        return True
-    if isinstance(value, str) and value.strip() == "":
-        return True
-    return False
+    return key not in args or args[key] is None or (isinstance(args[key], str) and args[key].strip() == "")
 
 
 def create_llm():
