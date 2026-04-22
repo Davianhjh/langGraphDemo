@@ -75,7 +75,7 @@ def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, An
         if not file_path or not tool_name:
             continue
         tool_calls.append({
-            "id": f"auto_doc_{uuid.uuid4().hex}",
+            "id": f"auto_convert_{uuid.uuid4().hex}",
             "name": tool_name,
             "args": {"file_path": file_path},
             "type": "tool_call",
@@ -95,15 +95,15 @@ def _rewrite_document_tool_calls(
     if not has_document_call:
         return tool_calls
 
-    auto_document_calls = _build_document_tool_calls(files)
-    if not auto_document_calls:
-        return tool_calls
-
     passthrough_calls = [
         tool_call
         for tool_call in tool_calls
         if not (isinstance(tool_call, dict) and tool_call.get("name") in DOCUMENT_CONVERSION_TOOLS)
     ]
+
+    auto_document_calls = _build_document_tool_calls(files)
+    if not auto_document_calls:
+        return passthrough_calls
     return passthrough_calls + auto_document_calls
 
 
