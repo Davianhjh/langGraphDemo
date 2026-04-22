@@ -73,11 +73,11 @@ def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, An
         ext = _normalize_file_ext(file_item)
         tool_name = DOCUMENT_CONVERSION_TOOL_BY_EXT.get(ext)
         if not file_path or not tool_name:
-            logger.info("Skip document auto-routing for file_name=%s, file_ext=%s, file_url=%s",
-                        file_item.get("file_name"), ext, file_item.get("file_url"))
+            logger.info("Skip document auto-routing for file_name=%s, raw_file_ext=%s, normalized_ext=%s, file_url=%s",
+                        file_item.get("file_name"), file_item.get("file_ext"), ext, file_item.get("file_url"))
             continue
         tool_calls.append({
-            "id": f"doc_convert_{uuid.uuid4().hex}",
+            "id": f"call_{tool_name}_{uuid.uuid4().hex}",
             "name": tool_name,
             "args": {"file_path": file_path},
             "type": "tool_call",
