@@ -97,6 +97,7 @@ def chat(req: ChatRequest):
                 content=(
                     "你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。"
                     "当用户请求文件转换时，优先调用可用工具；如果有 files 列表，请对每个文件分别完成转换。"
+                    "文件类型与工具映射为：doc/docx/rtf -> word_to_markdown，xls/xlsx/csv -> excel_to_markdown，pdf -> pdf_to_markdown。"
                     "工具入参中必须传 file_path，并使用 files 列表中的 file_url 作为 file_path。"
                     "拿到工具结果后，最终回复需逐个文件返回转换后的链接。"
                 )
