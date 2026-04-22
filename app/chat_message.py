@@ -1,11 +1,15 @@
 import time
 import hashlib
+import json
+import logging
 from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.chat_summary import Message, generate_session_title
 from db.mysql import mysql_pool
+
+logger = logging.getLogger(__name__)
 
 
 def _now_ts() -> float:
@@ -63,13 +67,33 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
 
     rows = []
     first_human_message = ""
+    first_human_seen = False
     for m in messages:
         rec = _message_to_record(m)
         role = rec["role"]
         if 'ai' == role or 'human' == role:
             content = rec.get("content")
             message_id = rec.get("id")
-            rows.append((user_id, thread_id, role, content, message_id))
+            files_json = ""
+            if role == "human" and not first_human_seen:
+                first_human_seen = True
+                raw = rec.get("raw")
+                msg_files = None
+                if raw is not None and hasattr(raw, "additional_kwargs"):
+                    msg_files = (raw.additional_kwargs or {}).get("files")
+                if msg_files is not None:
+                    try:
+                        files_json = json.dumps(msg_files, ensure_ascii=False)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(
+                            "Failed to serialize files for thread_id=%s, files_type=%s: %s",
+                            thread_id,
+                            type(msg_files).__name__,
+                            e,
+                        )
+                        files_json = ""
+
+            rows.append((user_id, thread_id, role, content, message_id, files_json))
             if 'human' == role and not first_human_message:
                 first_human_message = content
 
@@ -78,7 +102,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
 
     with mysql_pool.connection(timeout=5) as conn:
         with conn.cursor() as cur:
-            sql1 = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
+            sql1 = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id, files) VALUES (%s, %s, %s, %s, %s, %s)"
             cur.executemany(sql1, rows)
             conn.commit()
             affected = cur.rowcount or 0
@@ -131,4 +155,3 @@ async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[M
                     print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
         conn.close()
     return new_title
-

@@ -87,10 +87,20 @@ def chat(req: ChatRequest):
     initial_state = {
         "thread_id": thread_id,
         "user_id": user_id,
+        "files": [f.model_dump() for f in files] if files else [],
         "messages": [
             SystemMessage(
-                content="你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。并能够判断用户的意图和自己的工具能力匹配时，无论是否缺少参数，优先执行工具调用。"),
-            HumanMessage(content=last_user.content)
+                content=(
+                    "你是一个温暖、准确且有用的助理，能针对用户的各种问题给出答案。"
+                    "当用户请求文件转换时，优先调用可用工具；如果有 files 列表，请对每个文件分别完成转换。"
+                    "工具入参中必须传 file_path，并使用 files 列表中的 file_url 作为 file_path。"
+                    "拿到工具结果后，最终回复需逐个文件返回转换后的链接。"
+                )
+            ),
+            HumanMessage(
+                content=last_user.content,
+                additional_kwargs={"files": [f.model_dump() for f in files]} if files else {},
+            )
         ]
     }
 
