@@ -65,7 +65,7 @@ def _normalize_file_ext(file_item: dict[str, Any]) -> str:
 def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build document conversion tool call payloads from files metadata."""
     tool_calls = []
-    for idx, file_item in enumerate(files, start=1):
+    for file_index, file_item in enumerate(files, start=1):
         if not isinstance(file_item, dict):
             continue
         file_path = file_item.get("file_url")
@@ -74,7 +74,7 @@ def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, An
         if not file_path or not tool_name:
             continue
         tool_calls.append({
-            "id": f"auto_doc_{idx}_{tool_name}_{uuid.uuid4().hex[:8]}",
+            "id": f"auto_doc_{file_index}_{tool_name}_{uuid.uuid4().hex[:8]}",
             "name": tool_name,
             "args": {"file_path": file_path},
             "type": "tool_call",
