@@ -58,7 +58,8 @@ def _normalize_file_ext(file_item: dict[str, Any]) -> str:
 
     file_url = str(file_item.get("file_url") or "").strip()
     if "." in file_url:
-        return file_url.rsplit(".", 1)[-1].split("?", 1)[0].lower()
+        url_without_query = file_url.split("?", 1)[0]
+        return url_without_query.rsplit(".", 1)[-1].lower()
     return ""
 
 
@@ -74,7 +75,7 @@ def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, An
         if not file_path or not tool_name:
             continue
         tool_calls.append({
-            "id": f"auto_doc_{uuid.uuid4().hex[:8]}",
+            "id": f"auto_doc_{uuid.uuid4().hex}",
             "name": tool_name,
             "args": {"file_path": file_path},
             "type": "tool_call",
