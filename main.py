@@ -14,6 +14,12 @@ from tools.third_party.aliyun_oss_uploader import upload_file as oss_upload_file
 app = FastAPI()
 lang_app = init_graph()
 
+class ChatFile(BaseModel):
+    file_url: str
+    file_name: str
+    file_ext: str
+    mime_type: str
+    file_size: int
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant", "tool"]
@@ -24,6 +30,7 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
     user_id: Optional[str] = None
     messages: list[ChatMessage]
+    files: Optional[List[ChatFile]] = None
 
 
 # 新增响应模型
@@ -69,6 +76,7 @@ def sse_data(text: str) -> str:
 def chat(req: ChatRequest):
     thread_id = req.thread_id
     user_id = req.user_id
+    files = req.files or []
 
     # 只取本轮最新 user 消消息追加给 LangGraph
     last_user = next((m for m in reversed(req.messages) if m.role == "user"), None)
@@ -244,7 +252,7 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
     return {"total": total, "page": page, "page_size": page_size, "messages": messages}
 
 
-@app.post("/upload")
+@app.post("/upload", response_model=ChatFile)
 async def upload_file_endpoint(user_id: str = Form(...), file: UploadFile = File(...)):
     """接收 form-data: user_id, file；上传到 Aliyun OSS 并返回结构化信息。
 
