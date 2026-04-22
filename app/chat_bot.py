@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Annotated, Optional, Any
 
 from langchain_core.messages import AIMessage, SystemMessage
@@ -13,6 +14,8 @@ from typing_extensions import TypedDict
 from app.chat_message import persist_messages_batch
 from tools.tool_router import tools, tool_required_args
 
+logger = logging.getLogger(__name__)
+
 
 class State(TypedDict, total=False):
     user_id: Optional[str]
@@ -26,6 +29,7 @@ class State(TypedDict, total=False):
 
 
 def _is_missing_arg(args: dict, key: str) -> bool:
+    """Return True when a required tool argument is absent or effectively empty."""
     if key not in args:
         return True
     value = args[key]
@@ -81,10 +85,10 @@ def decision_node(state: State) -> State:
         if "file_path" in tool_required_args.get(tool_name, []) and _is_missing_arg(args, "file_path"):
             if file_idx < len(file_paths):
                 args["file_path"] = file_paths[file_idx]
-                print(f"Injected file_path for tool={tool_name}: {file_paths[file_idx]}")
+                logger.info("Injected file_path for tool=%s", tool_name)
                 file_idx += 1
             else:
-                print(f"No remaining file_path to inject for tool={tool_name}")
+                logger.warning("No remaining file_path to inject for tool=%s", tool_name)
 
         required_args = tool_required_args.get(tool_name, [])
         missing = [k for k in required_args if _is_missing_arg(args, k)]

@@ -1,12 +1,15 @@
 import time
 import hashlib
 import json
+import logging
 from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.chat_summary import Message, generate_session_title
 from db.mysql import mysql_pool
+
+logger = logging.getLogger(__name__)
 
 
 def _now_ts() -> float:
@@ -82,7 +85,12 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
                     try:
                         files_json = json.dumps(msg_files, ensure_ascii=False)
                     except (TypeError, ValueError) as e:
-                        print(f"Warning: failed to serialize files for thread_id={thread_id}: {e}")
+                        logger.warning(
+                            "Failed to serialize files for thread_id=%s, files_type=%s: %s",
+                            thread_id,
+                            type(msg_files).__name__,
+                            e,
+                        )
                         files_json = None
 
             rows.append((user_id, thread_id, role, content, message_id, files_json))
