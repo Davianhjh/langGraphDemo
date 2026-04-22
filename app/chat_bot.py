@@ -26,7 +26,16 @@ class State(TypedDict, total=False):
 
 
 def _is_missing_arg(args: dict, key: str) -> bool:
-    return key not in args or args[key] is None or (isinstance(args[key], str) and args[key].strip() == "")
+    if key not in args:
+        return True
+    value = args[key]
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value) == 0
+    return False
 
 
 def create_llm():
@@ -72,7 +81,10 @@ def decision_node(state: State) -> State:
         if "file_path" in tool_required_args.get(tool_name, []) and _is_missing_arg(args, "file_path"):
             if file_idx < len(file_paths):
                 args["file_path"] = file_paths[file_idx]
+                print(f"Injected file_path for tool={tool_name}: {file_paths[file_idx]}")
                 file_idx += 1
+            else:
+                print(f"No remaining file_path to inject for tool={tool_name}")
 
         required_args = tool_required_args.get(tool_name, [])
         missing = [k for k in required_args if _is_missing_arg(args, k)]

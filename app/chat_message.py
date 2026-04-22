@@ -81,7 +81,8 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
                 if msg_files is not None:
                     try:
                         files_json = json.dumps(msg_files, ensure_ascii=False)
-                    except Exception:
+                    except (TypeError, ValueError) as e:
+                        print(f"Warning: failed to serialize files for thread_id={thread_id}: {e}")
                         files_json = None
 
             rows.append((user_id, thread_id, role, content, message_id, files_json))
