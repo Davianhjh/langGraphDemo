@@ -1,5 +1,6 @@
 import os
 import logging
+import uuid
 from typing import Annotated, Optional, Any
 
 from langchain_core.messages import AIMessage, SystemMessage
@@ -46,6 +47,7 @@ DOCUMENT_CONVERSION_TOOLS = {
 
 
 def _normalize_file_ext(file_item: dict[str, Any]) -> str:
+    """Normalize extension by file_ext -> file_name -> file_url, stripping URL query parts."""
     file_ext = str(file_item.get("file_ext") or "").strip().lower().lstrip(".")
     if file_ext:
         return file_ext
@@ -61,6 +63,7 @@ def _normalize_file_ext(file_item: dict[str, Any]) -> str:
 
 
 def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build document conversion tool call payloads from files metadata."""
     tool_calls = []
     for idx, file_item in enumerate(files, start=1):
         if not isinstance(file_item, dict):
@@ -71,7 +74,7 @@ def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, An
         if not file_path or not tool_name:
             continue
         tool_calls.append({
-            "id": f"auto_doc_{idx}_{tool_name}",
+            "id": f"auto_doc_{idx}_{tool_name}_{uuid.uuid4().hex[:8]}",
             "name": tool_name,
             "args": {"file_path": file_path},
             "type": "tool_call",
@@ -83,6 +86,7 @@ def _rewrite_document_tool_calls(
         tool_calls: list[dict[str, Any]],
         files: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """Replace document-conversion tool calls with extension-routed calls per file."""
     has_document_call = any(
         isinstance(tool_call, dict) and tool_call.get("name") in DOCUMENT_CONVERSION_TOOLS
         for tool_call in tool_calls
