@@ -79,7 +79,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
                 first_human_seen = True
                 raw = rec.get("raw")
                 msg_files = None
-                if hasattr(raw, "additional_kwargs"):
+                if raw is not None and hasattr(raw, "additional_kwargs"):
                     msg_files = (raw.additional_kwargs or {}).get("files")
                 if msg_files is not None:
                     try:

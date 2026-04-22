@@ -76,21 +76,21 @@ def decision_node(state: State) -> State:
 
     for tool_call in tool_calls:
         tool_name = tool_call["name"]
+        required_args = tool_required_args.get(tool_name, [])
         args = tool_call.get("args")
         if not isinstance(args, dict):
             args = {}
             tool_call["args"] = args
 
         # 若模型未传 file_path，则按 files 列表顺序自动注入 file_url
-        if "file_path" in tool_required_args.get(tool_name, []) and _is_missing_arg(args, "file_path"):
+        if "file_path" in required_args and _is_missing_arg(args, "file_path"):
             if file_idx < len(file_paths):
                 args["file_path"] = file_paths[file_idx]
-                logger.info("Injected file_path for tool=%s", tool_name)
+                logger.info("Injected file_path=%s for tool=%s", args["file_path"], tool_name)
                 file_idx += 1
             else:
                 logger.warning("No remaining file_path to inject for tool=%s", tool_name)
 
-        required_args = tool_required_args.get(tool_name, [])
         missing = [k for k in required_args if _is_missing_arg(args, k)]
         if missing:
             missing_tool_name = tool_name
