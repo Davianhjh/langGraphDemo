@@ -1,13 +1,15 @@
 from typing import Literal, Optional, List
 
+import os
 import uvicorn
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from app.chat_bot import init_graph
 from db.mysql import mysql_pool
+from tools.third_party.aliyun_oss_uploader import upload_file as oss_upload_file
 
 app = FastAPI()
 lang_app = init_graph()
@@ -240,6 +242,61 @@ async def dialog(user_id: Optional[str] = None, thread_id: Optional[str] = None,
         conn.close()
 
     return {"total": total, "page": page, "page_size": page_size, "messages": messages}
+
+
+@app.post("/upload")
+async def upload_file_endpoint(user_id: str = Form(...), file: UploadFile = File(...)):
+    """接收 form-data: user_id, file；上传到 Aliyun OSS 并返回结构化信息。
+
+    返回 JSON:
+    {
+      "file_url": str,
+      "file_name": str,
+      "file_ext": str,
+      "mime_type": str
+    }
+    """
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"failed to read uploaded file: {e}")
+
+    file_size = len(content)
+
+    try:
+        url = oss_upload_file(content, filename=file.filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"upload failed: {e}")
+
+    name = file.filename or ""
+    base, ext = os.path.splitext(name)
+    ext = ext.lstrip('.') if ext else ''
+
+    # Persist file metadata to MySQL (chat_files)
+    try:
+        with mysql_pool.connection(timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO chat_files (user_id, file_name, file_url, file_size, file_ext, mime_type) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (user_id, name, url, file_size, ext, file.content_type or ""),
+                )
+                conn.commit()
+            conn.close()
+        # Note: pool's connections are autocommit=True in config, so no explicit commit needed
+    except Exception as e:
+        # If DB write fails, return 500 to surface the error (alternatively you could log and continue)
+        raise HTTPException(status_code=500, detail=f"failed to persist file metadata: {e}")
+
+    return {
+        "file_url": url,
+        "file_name": name,
+        "file_ext": ext,
+        "file_size": file_size,
+        "mime_type": file.content_type or "",
+    }
 
 
 if __name__ == "__main__":
