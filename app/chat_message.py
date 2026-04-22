@@ -1,5 +1,6 @@
 import time
 import hashlib
+import json
 from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -63,13 +64,27 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
 
     rows = []
     first_human_message = ""
+    first_human_files_written = False
     for m in messages:
         rec = _message_to_record(m)
         role = rec["role"]
         if 'ai' == role or 'human' == role:
             content = rec.get("content")
             message_id = rec.get("id")
-            rows.append((user_id, thread_id, role, content, message_id))
+            files_json = None
+            if role == "human" and not first_human_files_written:
+                raw = rec.get("raw")
+                msg_files = None
+                if hasattr(raw, "additional_kwargs"):
+                    msg_files = (getattr(raw, "additional_kwargs", {}) or {}).get("files")
+                if msg_files is not None:
+                    try:
+                        files_json = json.dumps(msg_files, ensure_ascii=False)
+                        first_human_files_written = True
+                    except Exception:
+                        files_json = None
+
+            rows.append((user_id, thread_id, role, content, message_id, files_json))
             if 'human' == role and not first_human_message:
                 first_human_message = content
 
@@ -78,7 +93,7 @@ def persist_messages_batch(user_id: str, thread_id: str, messages: List[Any]) ->
 
     with mysql_pool.connection(timeout=5) as conn:
         with conn.cursor() as cur:
-            sql1 = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id) VALUES (%s, %s, %s, %s, %s)"
+            sql1 = "INSERT IGNORE INTO chat_messages (user_id, thread_id, role, content, message_id, files) VALUES (%s, %s, %s, %s, %s, %s)"
             cur.executemany(sql1, rows)
             conn.commit()
             affected = cur.rowcount or 0
@@ -131,4 +146,3 @@ async def summary_chat_messages(dialog_id: int, thread_id: str, messages: List[M
                     print(f"Error generating title for dialog_id={dialog_id} thread={thread_id}: {e}")
         conn.close()
     return new_title
-

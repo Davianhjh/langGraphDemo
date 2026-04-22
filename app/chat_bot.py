@@ -1,7 +1,7 @@
 import os
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.redis import RedisSaver
 from langgraph.constants import START, END
@@ -17,6 +17,7 @@ from tools.tool_router import tools, tool_required_args
 class State(TypedDict, total=False):
     user_id: Optional[str]
     thread_id: Optional[str]
+    files: Optional[list[dict[str, Any]]]
     messages: Annotated[list, add_messages]
     pending_tool_name: Optional[str]
     pending_tool_args: Optional[dict]
@@ -36,11 +37,14 @@ def create_llm():
 def decision_node(state: State) -> State:
     last = state["messages"][-1]
     tool_calls = getattr(last, "tool_calls", None) or []
+    files = state.get("files") or []
+    file_paths = [f.get("file_url") for f in files if isinstance(f, dict) and f.get("file_url")]
     # 没有工具调用：清理 pending，直接结束
     if not tool_calls:
         return {
             "user_id": state.get("user_id"),
             "thread_id": state.get("thread_id"),
+            "files": files,
             "messages": state["messages"],
             "pending_tool_name": None,
             "pending_tool_args": None,
@@ -48,22 +52,40 @@ def decision_node(state: State) -> State:
             "last_persisted_idx": state.get("last_persisted_idx", -1),
         }
 
-    tool_call = tool_calls[0]  # 目前假设每次只调用一个工具
-    tool_name = tool_call["name"]
-    args = tool_call.get("args", {}) or {}
+    missing_tool_name = None
+    missing_args = None
+    missing_fields = None
+    file_idx = 0
 
-    required_args = tool_required_args.get(tool_name, [])
-    missing = [k for k in required_args if k not in args]
+    for tool_call in tool_calls:
+        tool_name = tool_call["name"]
+        args = tool_call.get("args", {}) or {}
+
+        # 若模型未传 file_path，则按 files 列表顺序自动注入 file_url
+        if "file_path" in tool_required_args.get(tool_name, []) and not args.get("file_path"):
+            if file_idx < len(file_paths):
+                args["file_path"] = file_paths[file_idx]
+                tool_call["args"] = args
+                file_idx += 1
+
+        required_args = tool_required_args.get(tool_name, [])
+        missing = [k for k in required_args if not args.get(k)]
+        if missing:
+            missing_tool_name = tool_name
+            missing_args = args
+            missing_fields = missing
+            break
 
     # 缺参：保存 pending，后面交给 request_missing 追问
-    if missing:
+    if missing_fields:
         return {
             "user_id": state.get("user_id"),
             "thread_id": state.get("thread_id"),
+            "files": files,
             "messages": state["messages"],
-            "pending_tool_name": tool_name,
-            "pending_tool_args": args,
-            "missing_fields": missing,
+            "pending_tool_name": missing_tool_name,
+            "pending_tool_args": missing_args,
+            "missing_fields": missing_fields,
             "last_persisted_idx": state.get("last_persisted_idx", -1),
         }
     else:
@@ -71,6 +93,7 @@ def decision_node(state: State) -> State:
         return {
             "user_id": state.get("user_id"),
             "thread_id": state.get("thread_id"),
+            "files": files,
             "messages": state["messages"],
             "pending_tool_name": None,
             "pending_tool_args": None,
@@ -88,6 +111,7 @@ def request_missing_node(state: State) -> State:
     return {
         "user_id": state.get("user_id"),
         "thread_id": state.get("thread_id"),
+        "files": state.get("files"),
         "messages": [AIMessage(content="\n".join(parts))],
         "pending_tool_args": state.get("pending_tool_args"),
         "pending_tool_name": state.get("pending_tool_name"),
@@ -118,7 +142,27 @@ def init_graph():
         def call_llm_with_tools(state: State):
             # state["messages"] 应包含历史消息；传入的最后一条通常是 user 的消息（HumanMessage）
             msgs = state.get("messages") or []
-            ai_msg = llm_with_tools.invoke(msgs)
+            invoke_msgs = list(msgs)
+            files = state.get("files") or []
+            if files:
+                file_lines = []
+                for idx, f in enumerate(files, start=1):
+                    if isinstance(f, dict):
+                        file_url = f.get("file_url") or ""
+                        file_name = f.get("file_name") or ""
+                        file_ext = f.get("file_ext") or ""
+                        file_lines.append(f"{idx}. file_name={file_name}, file_ext={file_ext}, file_url={file_url}")
+                if file_lines:
+                    invoke_msgs.append(
+                        SystemMessage(
+                            content=(
+                                "当前可用文件列表如下（转换工具参数 file_path 必须取自 file_url）：\n"
+                                + "\n".join(file_lines)
+                            )
+                        )
+                    )
+
+            ai_msg = llm_with_tools.invoke(invoke_msgs)
             # new sequence including the assistant reply
             new_msgs = msgs + [ai_msg]
 
@@ -195,6 +239,7 @@ def init_graph():
             return {
                 "user_id": user_id,
                 "thread_id": thread_id,
+                "files": files,
                 "messages": [ai_msg],
                 "pending_tool_name": None,
                 "pending_tool_args": None,
