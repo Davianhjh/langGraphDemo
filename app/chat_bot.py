@@ -28,6 +28,80 @@ class State(TypedDict, total=False):
     last_persisted_idx: Optional[int]
 
 
+DOCUMENT_CONVERSION_TOOL_BY_EXT = {
+    "doc": "word_to_markdown",
+    "docx": "word_to_markdown",
+    "rtf": "word_to_markdown",
+    "xls": "excel_to_markdown",
+    "xlsx": "excel_to_markdown",
+    "csv": "excel_to_markdown",
+    "pdf": "pdf_to_markdown",
+}
+
+DOCUMENT_CONVERSION_TOOLS = {
+    "word_to_markdown",
+    "excel_to_markdown",
+    "pdf_to_markdown",
+}
+
+
+def _normalize_file_ext(file_item: dict[str, Any]) -> str:
+    file_ext = str(file_item.get("file_ext") or "").strip().lower().lstrip(".")
+    if file_ext:
+        return file_ext
+
+    file_name = str(file_item.get("file_name") or "").strip()
+    if "." in file_name:
+        return file_name.rsplit(".", 1)[-1].lower()
+
+    file_url = str(file_item.get("file_url") or "").strip()
+    if "." in file_url:
+        return file_url.rsplit(".", 1)[-1].split("?", 1)[0].lower()
+    return ""
+
+
+def _build_document_tool_calls(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tool_calls = []
+    for idx, file_item in enumerate(files, start=1):
+        if not isinstance(file_item, dict):
+            continue
+        file_path = file_item.get("file_url")
+        ext = _normalize_file_ext(file_item)
+        tool_name = DOCUMENT_CONVERSION_TOOL_BY_EXT.get(ext)
+        if not file_path or not tool_name:
+            continue
+        tool_calls.append({
+            "id": f"auto_doc_{idx}_{tool_name}",
+            "name": tool_name,
+            "args": {"file_path": file_path},
+            "type": "tool_call",
+        })
+    return tool_calls
+
+
+def _rewrite_document_tool_calls(
+        tool_calls: list[dict[str, Any]],
+        files: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    has_document_call = any(
+        isinstance(tool_call, dict) and tool_call.get("name") in DOCUMENT_CONVERSION_TOOLS
+        for tool_call in tool_calls
+    )
+    if not has_document_call:
+        return tool_calls
+
+    auto_document_calls = _build_document_tool_calls(files)
+    if not auto_document_calls:
+        return tool_calls
+
+    passthrough_calls = [
+        tool_call
+        for tool_call in tool_calls
+        if not (isinstance(tool_call, dict) and tool_call.get("name") in DOCUMENT_CONVERSION_TOOLS)
+    ]
+    return passthrough_calls + auto_document_calls
+
+
 def _is_arg_missing_or_empty(args: dict, key: str) -> bool:
     """Return True when a required tool argument is absent or effectively empty."""
     if key not in args:
@@ -55,6 +129,10 @@ def decision_node(state: State) -> State:
     last = state["messages"][-1]
     tool_calls = getattr(last, "tool_calls", None) or []
     files = state.get("files") or []
+    if tool_calls and files:
+        tool_calls = _rewrite_document_tool_calls(tool_calls, files)
+        if isinstance(last, AIMessage):
+            last.tool_calls = tool_calls
     file_paths = [f.get("file_url") for f in files if isinstance(f, dict) and f.get("file_url")]
     # 没有工具调用：清理 pending，直接结束
     if not tool_calls:
