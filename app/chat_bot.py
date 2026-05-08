@@ -127,7 +127,7 @@ def create_llm():
     llm = ChatOpenAI(
         api_key=os.getenv("OLLAMA_API_KEY"),
         base_url="https://ollama.com/v1",
-        model="minimax-m2.7:cloud",
+        model="gemma4:31b-cloud",
     )
     return llm.bind_tools(tools)
 
